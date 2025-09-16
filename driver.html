@@ -1,48 +1,86 @@
-<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Driver - Share Location</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Driver - Bus Tracker</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;padding:12px}
+    #status{margin:10px 0}
+    button{padding:8px 12px}
+  </style>
 </head>
 <body>
-  <h2>Driver Page</h2>
-  <button onclick="sendLocation()">Send Location</button>
-  <p id="status"></p>
+  <h2>Driver — Bus Tracker</h2>
+  <div id="status">Location: <span id="loc">unknown</span></div>
+  <button id="startBtn">Start sharing location</button>
+  <button id="stopBtn" disabled>Stop</button>
+  <p>Updates are sent to <code>/location</code> on the server.</p>
 
   <script>
-    const backendUrl = "https://your-backend.onrender.com"; // 🔗 replace with backend deployment URL
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const locSpan = document.getElementById('loc');
 
-    function sendLocation() {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            const data = {
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              accuracy: pos.coords.accuracy
-            };
+    let watchId = null;
+    let sendInterval = null;
+    let latestPos = null;
+    const SERVER = window.location.origin; // uses same origin as page (good for dev)
 
-            fetch(`${backendUrl}/location`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(data)
-            })
-            .then(res => res.json())
-            .then(res => {
-              document.getElementById("status").textContent = "✅ Location sent!";
-              console.log("Sent:", res);
-            })
-            .catch(err => console.error("Error:", err));
-          },
-          (err) => {
-            document.getElementById("status").textContent = "❌ Permission denied.";
-            console.error(err);
-          }
-        );
-      } else {
-        alert("Geolocation not supported in this browser.");
+    async function sendPosition(pos) {
+      try {
+        await fetch(SERVER + '/location', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            heading: pos.coords.heading || null,
+            speed: pos.coords.speed || null,
+          }),
+        });
+      } catch (e) {
+        console.error('Failed to send position', e);
       }
     }
+
+    function updateUi(pos) {
+      latestPos = pos;
+      locSpan.textContent = `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)} (acc ${pos.coords.accuracy}m)`;
+    }
+
+    startBtn.onclick = async () => {
+      // geolocation requires HTTPS except on localhost
+      if (!('geolocation' in navigator)) {
+        alert('Geolocation not supported in your browser');
+        return;
+      }
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+
+      // use watchPosition to get continuous updates (native callback)
+      watchId = navigator.geolocation.watchPosition((pos) => {
+        updateUi(pos);
+      }, (err) => {
+        console.error('geolocation error', err);
+        alert('Geolocation error: ' + err.message);
+      }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 });
+
+      // also send latest known position every 3 seconds to server
+      sendInterval = setInterval(() => {
+        if (latestPos) sendPosition(latestPos);
+      }, 3000);
+    };
+
+    stopBtn.onclick = () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (sendInterval) clearInterval(sendInterval);
+      watchId = null;
+      sendInterval = null;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      locSpan.textContent = 'stopped';
+    };
   </script>
 </body>
 </html>
