@@ -1,36 +1,73 @@
-<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>User - Track Driver</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>User - Bus Tracker</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-sA+e2YfR9b8fK+WqT6nKq0rH9FQKxj2h6pG8C+v6p6U=" crossorigin=""/>
+  <style>
+    body{margin:0;font-family:Arial,Helvetica,sans-serif}
+    #map{width:100%;height:92vh}
+    #top{padding:8px;background:#f7f7f7}
+  </style>
 </head>
 <body>
-  <h2>User Page</h2>
-  <button onclick="getDriverLocation()">Get Driver Location</button>
-  <p id="location"></p>
+  <div id="top">
+    <strong>Bus live location</strong>
+    <button id="follow">Follow</button>
+    <span id="info"></span>
+  </div>
+  <div id="map"></div>
 
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-o9N1j7kL7gZ6kQm2bQ3bJrD2gD7wQJH9mx0o6aQm2+8=" crossorigin=""></script>
   <script>
-    // 🔗 Use your deployed backend URL here
-    const backendUrl = "https://your-backend.onrender.com";  
+    const SERVER = window.location.origin; // same origin
+    const map = L.map('map').setView([20.5937,78.9629], 5); // India view by default
 
-    function getDriverLocation() {
-      fetch(`${backendUrl}/location`)
-        .then(res => res.json())
-        .then(data => {
-          console.log("Driver location response:", data); // debug log
-          if (data.lat && data.lng) {
-            document.getElementById("location").textContent =
-              `🚍 Driver is at Lat: ${data.lat}, Lng: ${data.lng}, Accuracy: ${data.accuracy}m`;
-          } else {
-            document.getElementById("location").textContent =
-              "⚠️ No driver location available yet.";
-          }
-        })
-        .catch(err => {
-          console.error("Error fetching location:", err);
-          document.getElementById("location").textContent = "❌ Failed to fetch location.";
-        });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    let marker = null;
+    let circle = null;
+    let follow = true;
+    const info = document.getElementById('info');
+    document.getElementById('follow').onclick = () => { follow = !follow; document.getElementById('follow').textContent = follow ? 'Follow' : 'Unfollow'; };
+
+    async function fetchLocation() {
+      try {
+        const res = await fetch(SERVER + '/location');
+        if (!res.ok) throw new Error('Network');
+        const data = await res.json();
+        if (!data) {
+          info.textContent = 'No driver location yet.';
+          return;
+        }
+        const { lat, lng, updatedAt } = data;
+        info.textContent = `Updated: ${new Date(updatedAt).toLocaleTimeString()}`;
+
+        if (!marker) {
+          marker = L.marker([lat, lng]).addTo(map);
+          circle = L.circle([lat, lng], { radius: 50 }).addTo(map);
+        } else {
+          marker.setLatLng([lat, lng]);
+          circle.setLatLng([lat, lng]);
+        }
+
+        if (follow) map.setView([lat, lng], 15);
+
+      } catch (e) {
+        console.error('Failed to fetch location', e);
+        info.textContent = 'Error fetching location';
+      }
     }
+
+    // poll every 2 seconds
+    setInterval(fetchLocation, 2000);
+    // initial fetch
+    fetchLocation();
   </script>
 </body>
 </html>
