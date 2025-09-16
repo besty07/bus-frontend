@@ -1,86 +1,144 @@
+<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Driver - Bus Tracker</title>
+  <title>Driver - Bus Tracker </title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <style>
-    body{font-family:Arial,Helvetica,sans-serif;padding:12px}
-    #status{margin:10px 0}
-    button{padding:8px 12px}
+    body { font-family: Arial, sans-serif; padding: 12px; }
+    button { margin: 6px 0; padding: 8px 12px; }
+    #status { margin-top: 8px; color: #333; }
+    .bad { color: #b00; }
+    .ok { color: #097; }
   </style>
 </head>
 <body>
-  <h2>Driver — Bus Tracker</h2>
-  <div id="status">Location: <span id="loc">unknown</span></div>
-  <button id="startBtn">Start sharing location</button>
-  <button id="stopBtn" disabled>Stop</button>
-  <p>Updates are sent to <code>/location</code> on the server.</p>
+  <h2>Driver — Share Location</h2>
+
+  <div>
+    <button id="startBtn">Start Sharing (ask permission)</button>
+    <button id="stopBtn" disabled>Stop Sharing</button>
+  </div>
+
+  <div id="status">Status: <span id="perm">unknown</span></div>
+  <div id="info">Last sent: <span id="last">none</span></div>
+  <div id="acc">Accuracy: <span id="accuracy">—</span></div>
+  <div id="hint" style="margin-top:8px;color:#555"></div>
 
   <script>
+    const serverUrl = "coderesq-sih-production.up.railway.app";
+
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
-    const locSpan = document.getElementById('loc');
+    const permEl = document.getElementById('perm');
+    const lastEl = document.getElementById('last');
+    const accEl = document.getElementById('accuracy');
+    const hintEl = document.getElementById('hint');
 
     let watchId = null;
-    let sendInterval = null;
-    let latestPos = null;
-    const SERVER = window.location.origin; // uses same origin as page (good for dev)
 
-    async function sendPosition(pos) {
-      try {
-        await fetch(SERVER + '/location', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            heading: pos.coords.heading || null,
-            speed: pos.coords.speed || null,
-          }),
-        });
-      } catch (e) {
-        console.error('Failed to send position', e);
+    // Check permissions (if Permissions API available)
+    function checkPermission() {
+      if (!navigator.permissions) {
+        permEl.textContent = 'Permissions API not available';
+        return;
+      }
+      navigator.permissions.query({ name: 'geolocation' }).then(result => {
+        permEl.textContent = result.state;
+        result.onchange = () => permEl.textContent = result.state;
+      }).catch(() => {
+        permEl.textContent = 'unknown';
+      });
+    }
+    checkPermission();
+
+    function sendLocation(position) {
+      const payload = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        timestamp: position.timestamp
+      };
+
+      // Display locally
+      lastEl.textContent = new Date(payload.timestamp).toLocaleTimeString();
+      accEl.textContent = payload.accuracy + ' m';
+
+      // Heuristic: large accuracy => coarse (IP) location
+      if (payload.accuracy > 200) {
+        hintEl.innerHTML = '<span class="bad">Low accuracy (&gt;200 m): likely IP/Wi-Fi based. Enable GPS / high-accuracy mode.</span>';
+      } else if (payload.accuracy > 50) {
+        hintEl.innerHTML = '<span class="ok">Moderate accuracy (' + payload.accuracy + ' m). May be mixed sources.</span>';
+      } else {
+        hintEl.innerHTML = '<span class="ok">Good accuracy (' + payload.accuracy + ' m) — likely GPS.</span>';
+      }
+
+      // send to server
+      fetch(serverUrl + '/location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat: payload.lat, lng: payload.lng })
+      }).then(() => {
+        console.log('Location sent', payload);
+      }).catch(err => {
+        console.error('Send error', err);
+      });
+    }
+
+    function handleError(err) {
+      console.log('Geolocation error', err);
+      if (err.code === 1) {
+        hintEl.innerHTML = '<span class="bad">Permission denied. Allow location in your browser settings for this site.</span>';
+      } else if (err.code === 2) {
+        hintEl.innerHTML = '<span class="bad">Position unavailable. Try enabling GPS / restart location services.</span>';
+      } else if (err.code === 3) {
+        hintEl.innerHTML = '<span class="bad">Timeout. Try increasing timeout or ensure GPS is enabled.</span>';
+      } else {
+        hintEl.innerHTML = '<span class="bad">Unknown error: ' + err.message + '</span>';
       }
     }
 
-    function updateUi(pos) {
-      latestPos = pos;
-      locSpan.textContent = `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)} (acc ${pos.coords.accuracy}m)`;
-    }
-
-    startBtn.onclick = async () => {
-      // geolocation requires HTTPS except on localhost
-      if (!('geolocation' in navigator)) {
-        alert('Geolocation not supported in your browser');
+    function startSharing() {
+      if (!navigator.geolocation) {
+        hintEl.innerHTML = '<span class="bad">Geolocation not supported by this browser.</span>';
         return;
       }
 
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
+      // getCurrentPosition first to trigger permission popup in some browsers
+      navigator.geolocation.getCurrentPosition(pos => {
+        // if this succeeds, start watchPosition for continuous updates
+        sendLocation(pos);
+        if (watchId === null) {
+          watchId = navigator.geolocation.watchPosition(sendLocation, handleError, {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 10000
+          });
+          startBtn.disabled = true;
+          stopBtn.disabled = false;
+        }
+      }, err => {
+        handleError(err);
+      }, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+    }
 
-      // use watchPosition to get continuous updates (native callback)
-      watchId = navigator.geolocation.watchPosition((pos) => {
-        updateUi(pos);
-      }, (err) => {
-        console.error('geolocation error', err);
-        alert('Geolocation error: ' + err.message);
-      }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 });
+    function stopSharing() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        hintEl.textContent = 'Stopped sharing.';
+      }
+    }
 
-      // also send latest known position every 3 seconds to server
-      sendInterval = setInterval(() => {
-        if (latestPos) sendPosition(latestPos);
-      }, 3000);
-    };
+    startBtn.addEventListener('click', () => {
+      checkPermission();
+      startSharing();
+    });
+    stopBtn.addEventListener('click', stopSharing);
 
-    stopBtn.onclick = () => {
-      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-      if (sendInterval) clearInterval(sendInterval);
-      watchId = null;
-      sendInterval = null;
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-      locSpan.textContent = 'stopped';
-    };
+    // Optional: poll permission state regularly
+    setInterval(checkPermission, 5000);
   </script>
 </body>
 </html>
