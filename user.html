@@ -1,73 +1,82 @@
+<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>User - Bus Tracker</title>
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-sA+e2YfR9b8fK+WqT6nKq0rH9FQKxj2h6pG8C+v6p6U=" crossorigin=""/>
+  <title>User - Bus Tracker (Improved)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <style>
-    body{margin:0;font-family:Arial,Helvetica,sans-serif}
-    #map{width:100%;height:92vh}
-    #top{padding:8px;background:#f7f7f7}
+    body { margin: 0; font-family: Arial, sans-serif; }
+    #map { width: 100%; height: 90vh; }
+    #info { padding: 8px; background: #f5f5f5; font-size: 14px; }
+    .bad { color: #b00; font-weight: bold; }
+    .ok { color: #097; font-weight: bold; }
   </style>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 </head>
 <body>
-  <div id="top">
-    <strong>Bus live location</strong>
-    <button id="follow">Follow</button>
-    <span id="info"></span>
-  </div>
+  <h3 style="margin:8px">User — Track Driver</h3>
   <div id="map"></div>
+  <div id="info">
+    Status: <span id="status">Waiting for driver...</span><br/>
+    Accuracy: <span id="accuracy">—</span><br/>
+    Last update: <span id="last">—</span>
+  </div>
 
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-o9N1j7kL7gZ6kQm2bQ3bJrD2gD7wQJH9mx0o6aQm2+8=" crossorigin=""></script>
   <script>
-    const SERVER = window.location.origin; // same origin
-    const map = L.map('map').setView([20.5937,78.9629], 5); // India view by default
+    const serverUrl = "coderesq-sih-production.up.railway.app";
+    const statusEl = document.getElementById('status');
+    const accEl = document.getElementById('accuracy');
+    const lastEl = document.getElementById('last');
 
+    // init map
+    const map = L.map('map').setView([28.6139, 77.2090], 13); // default Delhi
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    let marker = null;
-    let circle = null;
-    let follow = true;
-    const info = document.getElementById('info');
-    document.getElementById('follow').onclick = () => { follow = !follow; document.getElementById('follow').textContent = follow ? 'Follow' : 'Unfollow'; };
+    let driverMarker = null;
 
-    async function fetchLocation() {
-      try {
-        const res = await fetch(SERVER + '/location');
-        if (!res.ok) throw new Error('Network');
-        const data = await res.json();
-        if (!data) {
-          info.textContent = 'No driver location yet.';
-          return;
-        }
-        const { lat, lng, updatedAt } = data;
-        info.textContent = `Updated: ${new Date(updatedAt).toLocaleTimeString()}`;
+    function updateDriver() {
+      fetch(serverUrl + "/location")
+        .then(res => res.json())
+        .then(data => {
+          if (!data.lat || !data.lng) {
+            statusEl.innerHTML = '<span class="bad">Driver has not shared location yet.</span>';
+            return;
+          }
 
-        if (!marker) {
-          marker = L.marker([lat, lng]).addTo(map);
-          circle = L.circle([lat, lng], { radius: 50 }).addTo(map);
-        } else {
-          marker.setLatLng([lat, lng]);
-          circle.setLatLng([lat, lng]);
-        }
+          const lat = data.lat;
+          const lng = data.lng;
 
-        if (follow) map.setView([lat, lng], 15);
+          if (!driverMarker) {
+            driverMarker = L.marker([lat, lng]).addTo(map).bindPopup("Driver");
+            map.setView([lat, lng], 15);
+          } else {
+            driverMarker.setLatLng([lat, lng]);
+          }
 
-      } catch (e) {
-        console.error('Failed to fetch location', e);
-        info.textContent = 'Error fetching location';
-      }
+          statusEl.innerHTML = '<span class="ok">Driver location received.</span>';
+          accEl.textContent = data.accuracy ? data.accuracy + " m" : "unknown";
+          lastEl.textContent = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : "unknown";
+
+          // hint based on accuracy
+          if (data.accuracy) {
+            if (data.accuracy > 200) {
+              accEl.innerHTML = data.accuracy + ' m <span class="bad">(Low accuracy — coarse/IP-based)</span>';
+            } else if (data.accuracy > 50) {
+              accEl.innerHTML = data.accuracy + ' m <span class="ok">(Moderate)</span>';
+            } else {
+              accEl.innerHTML = data.accuracy + ' m <span class="ok">(Precise GPS)</span>';
+            }
+          }
+        })
+        .catch(err => {
+          console.error("Fetch error", err);
+          statusEl.innerHTML = '<span class="bad">Error fetching location.</span>';
+        });
     }
 
-    // poll every 2 seconds
-    setInterval(fetchLocation, 2000);
-    // initial fetch
-    fetchLocation();
+    setInterval(updateDriver, 3000); // refresh every 3s
   </script>
 </body>
 </html>
