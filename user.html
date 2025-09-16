@@ -10,22 +10,24 @@
   <p id="location"></p>
 
   <script>
-    const backendUrl = "https://your-backend.onrender.com"; // 🔗 replace with backend deployment URL
+    // 🔗 Use your deployed backend URL here
+    const backendUrl = "https://your-backend.onrender.com";  
 
     function getDriverLocation() {
       fetch(`${backendUrl}/location`)
         .then(res => res.json())
         .then(data => {
+          console.log("Driver location response:", data); // debug log
           if (data.lat && data.lng) {
             document.getElementById("location").textContent =
-              `Driver is at Lat: ${data.lat}, Lng: ${data.lng}, Accuracy: ${data.accuracy}m`;
+              `🚍 Driver is at Lat: ${data.lat}, Lng: ${data.lng}, Accuracy: ${data.accuracy}m`;
           } else {
             document.getElementById("location").textContent =
-              "⚠️ No driver location available.";
+              "⚠️ No driver location available yet.";
           }
         })
         .catch(err => {
-          console.error("Error:", err);
+          console.error("Error fetching location:", err);
           document.getElementById("location").textContent = "❌ Failed to fetch location.";
         });
     }
